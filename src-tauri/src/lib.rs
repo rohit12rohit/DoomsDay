@@ -1,4 +1,3 @@
-// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 mod activate;
 mod api;
 mod capture;
@@ -11,6 +10,8 @@ use tokio::task::JoinHandle;
 mod speaker;
 use capture::CaptureState;
 use speaker::VadConfig;
+// FIX: Import PostHog
+use tauri_plugin_posthog::{PostHogConfig, init as init_posthog};
 
 #[cfg(target_os = "macos")]
 #[allow(deprecated)]
@@ -30,11 +31,16 @@ fn get_app_version() -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Get PostHog API key
     let posthog_api_key = option_env!("POSTHOG_API_KEY").unwrap_or("").to_string();
+    
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             let _ = app.get_webview_window("main").expect("no main window").set_focus();
+        }))
+        // FIX: Initialize PostHog Plugin
+        .plugin(init_posthog(PostHogConfig {
+            api_key: posthog_api_key,
+            ..Default::default()
         }))
         .plugin(
             tauri_plugin_sql::Builder::default()
@@ -50,17 +56,16 @@ pub fn run() {
         .manage(shortcuts::LicenseState::default())
         .manage(shortcuts::MoveWindowState::default())
         .plugin(tauri_plugin_opener::init())
-        
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_keychain::init())
-        .plugin(tauri_plugin_shell::init()) // Add shell plugin
+        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_machine_uid::init());
+
     #[cfg(target_os = "macos")]
     {
         builder = builder.plugin(tauri_nspanel::init());
     }
     
-    // FIX: Initialize Autostart safely
     #[cfg(desktop)]
     {
         use tauri_plugin_autostart::MacosLauncher;
@@ -114,7 +119,6 @@ pub fn run() {
             speaker::get_audio_sample_rate,
         ])
         .setup(|app| {
-            // Setup main window positioning
             if let Err(e) = window::setup_main_window(app.handle()) {
                  eprintln!("Failed to setup main window: {}", e);
             }
@@ -124,13 +128,11 @@ pub fn run() {
 
             let app_handle = app.handle();
             if app_handle.get_webview_window("dashboard").is_none() {
-                if let Err(e) = window::create_dashboard_window(&app_handle) {
+                if let Err(e) = window::create_dashboard_window(app_handle) {
                     eprintln!("Failed to create dashboard window on startup: {}", e);
                 }
             }
 
-            // FIX: Initialize global shortcut plugin with centralized handler safely
-            // We use match instead of expect/unwrap to prevent crashing if registration fails
             let shortcut_plugin = tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(move |app, shortcut, event| {
                     use tauri_plugin_global_shortcut::{Shortcut, ShortcutState};
@@ -139,10 +141,7 @@ pub fn run() {
                         let state = app.state::<shortcuts::RegisteredShortcuts>();
                         let registered = match state.shortcuts.lock() {
                             Ok(guard) => guard,
-                            Err(poisoned) => {
-                                eprintln!("Mutex poisoned in handler, recovering...");
-                                poisoned.into_inner()
-                            }
+                            Err(poisoned) => poisoned.into_inner()
                         };
 
                         registered.iter().find_map(|(action_id, shortcut_str)| {
@@ -158,19 +157,14 @@ pub fn run() {
                     if let Some(action_id) = action_id {
                         match event.state() {
                             ShortcutState::Pressed => {
-                                if let Some(direction) =
-                                    action_id.strip_prefix("move_window_")
-                                {
+                                if let Some(direction) = action_id.strip_prefix("move_window_") {
                                     shortcuts::start_move_window(app, direction);
                                 } else {
-                                    eprintln!("Shortcut triggered: {}", action_id);
                                     shortcuts::handle_shortcut_action(app, &action_id);
                                 }
                             }
                             ShortcutState::Released => {
-                                if let Some(direction) =
-                                    action_id.strip_prefix("move_window_")
-                                {
+                                if let Some(direction) = action_id.strip_prefix("move_window_") {
                                     shortcuts::stop_move_window(app, direction);
                                 }
                             }
@@ -179,9 +173,8 @@ pub fn run() {
                 })
                 .build();
 
-            // Safely register the plugin
             if let Err(e) = app.handle().plugin(shortcut_plugin) {
-                eprintln!("WARNING: Failed to initialize global shortcut plugin: {}. Shortcuts may not work, but app will run.", e);
+                eprintln!("WARNING: Failed to initialize global shortcut plugin: {}", e);
             }
 
             if let Err(e) = shortcuts::setup_global_shortcuts(app.handle()) {
@@ -190,7 +183,6 @@ pub fn run() {
             Ok(())
         });
 
-    // Add macOS-specific permissions plugin
     #[cfg(target_os = "macos")]
     {
         builder = builder.plugin(tauri_plugin_macos_permissions::init());
@@ -205,44 +197,36 @@ pub fn run() {
 #[allow(deprecated, unexpected_cfgs)]
 fn init(app_handle: &AppHandle) {
     let window: WebviewWindow = app_handle.get_webview_window("main").unwrap();
-
     let panel = window.to_panel().unwrap();
-
     let delegate = panel_delegate!(MyPanelDelegate {
         window_did_become_key,
         window_did_resign_key
     });
-
     let handle = app_handle.to_owned();
-
     delegate.set_listener(Box::new(move |delegate_name: String| {
         match delegate_name.as_str() {
             "window_did_become_key" => {
-                let app_name = handle.package_info().name.to_owned();
-
-                println!("[info]: {:?} panel becomes key window!", app_name);
+               // Key window logic
             }
             "window_did_resign_key" => {
-                println!("[info]: panel resigned from key window!");
+               // Resign key logic
             }
             _ => (),
         }
     }));
-
-    // Set the window to float level
+    
     #[allow(non_upper_case_globals)]
     const NSFloatWindowLevel: i32 = 4;
     panel.set_level(NSFloatWindowLevel);
-
+    
     #[allow(non_upper_case_globals)]
     const NSWindowStyleMaskNonActivatingPanel: i32 = 1 << 7;
     panel.set_style_mask(NSWindowStyleMaskNonActivatingPanel);
-
+    
     #[allow(deprecated)]
     panel.set_collection_behaviour(
         NSWindowCollectionBehavior::NSWindowCollectionBehaviorFullScreenAuxiliary
             | NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces,
     );
-
     panel.set_delegate(delegate);
 }

@@ -7,7 +7,8 @@ use std::task::{Poll, Waker};
 use std::thread;
 use std::time::Duration;
 use tracing::error;
-use wasapi::{get_default_device, Direction, SampleType, StreamMode, WaveFormat};
+// FIX: Use ShareMode instead of StreamMode
+use wasapi::{get_default_device, Direction, SampleType, ShareMode, WaveFormat, Handle, AudioCaptureClient, DeviceCollection};
 
 pub struct SpeakerInput {
     device_index: Option<usize>,
@@ -23,7 +24,6 @@ impl SpeakerInput {
         Ok(Self { device_index })
     }
 
-    // Starts the audio stream
     pub fn stream(self) -> SpeakerStream {
         let sample_queue = Arc::new(Mutex::new(VecDeque::new()));
         let waker_state = Arc::new(Mutex::new(WakerState {
@@ -90,10 +90,9 @@ impl SpeakerStream {
         init_tx: mpsc::Sender<Result<u32>>,
         device_index: Option<usize>,
     ) -> Result<()> {
-        let init_result = (|| -> Result<_> {
+        let init_result: Result<(Handle, AudioCaptureClient, u32), anyhow::Error> = (|| {
             let device = match device_index {
                 Some(index) => {
-                    use wasapi::DeviceCollection;
                     let collection = DeviceCollection::new(&Direction::Render)?;
                     collection.get_device_at_index(index.try_into()?)?
                 }
@@ -104,17 +103,22 @@ impl SpeakerStream {
             let device_format = audio_client.get_mixformat()?;
             let actual_rate = device_format.get_samplespersec();
 
+            // Setup format
             let desired_format =
                 WaveFormat::new(32, 32, &SampleType::Float, actual_rate as usize, 1, None);
 
             let (_def_time, min_time) = audio_client.get_device_period()?;
 
-            let mode = StreamMode::EventsShared {
-                autoconvert: true,
-                buffer_duration_hns: min_time,
-            };
-
-            audio_client.initialize_client(&desired_format, &Direction::Capture, &mode)?;
+            // FIX: Initialize with modern signature (no StreamMode)
+            // initialize_client(format, period, direction, sharemode, event_handle)
+            audio_client.initialize_client(
+    &desired_format,
+    &Direction::Capture,
+    &ShareMode::Shared,
+).map_err(|e| {
+    error!("Failed to initialize audio client: {}", e);
+    e
+})?;
 
             let h_event = audio_client.set_get_eventhandle()?;
             let render_client = audio_client.get_audiocaptureclient()?;
@@ -164,30 +168,25 @@ impl SpeakerStream {
                     }
 
                     if !samples.is_empty() {
-                        // Consistent buffer overflow handling
                         let dropped = {
                             let mut queue = sample_queue.lock().unwrap();
-                            let max_buffer_size = 131072; // 128KB buffer (matching macOS)
+                            let max_buffer_size = 131072;
 
                             queue.extend(samples.iter());
 
-                            // If buffer exceeds maximum, drop oldest samples
-                            let dropped_count = if queue.len() > max_buffer_size {
+                            if queue.len() > max_buffer_size {
                                 let to_drop = queue.len() - max_buffer_size;
                                 queue.drain(0..to_drop);
                                 to_drop
                             } else {
                                 0
-                            };
-
-                            dropped_count
+                            }
                         };
 
                         if dropped > 0 {
                             error!("Windows buffer overflow - dropped {} samples", dropped);
                         }
 
-                        // Wake up consumer
                         {
                             let mut state = waker_state.lock().unwrap();
                             if !state.has_data {
@@ -211,7 +210,6 @@ impl SpeakerStream {
     }
 }
 
-// Drops the audio stream
 impl Drop for SpeakerStream {
     fn drop(&mut self) {
         {
@@ -227,11 +225,9 @@ impl Drop for SpeakerStream {
     }
 }
 
-// Stream of f32 audio samples from the speaker
 impl Stream for SpeakerStream {
     type Item = f32;
 
-    // Polls the audio stream
     fn poll_next(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,

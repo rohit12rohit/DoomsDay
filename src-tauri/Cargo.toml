@@ -1,40 +1,53 @@
 [package]
 name = "pluely"
-version = "0.1.0"
-description = "Pluely"
-authors = ["you"]
+version = "0.1.8"
+description = "The Open Source Alternative to Cluely"
+authors = ["HI"]
+license = "GPL-3.0"
 edition = "2021"
 
+[lib]
+name = "pluely_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
 [build-dependencies]
-tauri-build = { version = "2.0.0", features = [] }
+dotenv = "0.15"
+tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2.0.0", features = [ "macos-private-api"] }
-tauri-plugin-opener = "2.0.0"
-tauri-plugin-http = "2.0.0"
-tauri-plugin-shell = "2.0.0"
-tauri-plugin-global-shortcut = "2.0.0"
-tauri-plugin-sql = { version = "2.0.0", features = ["sqlite"] }
-tauri-plugin-autostart = "2.0.0"
-tauri-plugin-machine-uid = "2.0.0"
-tauri-plugin-keychain = "2.0.0"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-tokio = { version = "1", features = ["full"] }
+tauri = { version = "2", features = ["macos-private-api"] }
+tauri-plugin-opener = "2"
+tauri-plugin-http = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-keychain = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-sql = { version = "2", features = ["sqlite"] }
+tauri-plugin-autostart = "2"
+tauri-plugin-machine-uid = "0.1.2"
+tauri-plugin-single-instance = "2.0.0"
+# FIX: Restored PostHog plugin (Required to fix 'Permission posthog:default not found')
+tauri-plugin-posthog = "0.2.4"
 
-# --- ADD THESE NEW DEPENDENCIES ---
-tauri-plugin-single-instance = "2.0.0"  # Required for single instance lock
-anyhow = "1.0"                          # Required for error handling
-# ----------------------------------
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+anyhow = "1.0"
+tracing = "0.1"
+futures-util = "0.3"
+base64 = "0.22"
+reqwest = { version = "0.12", features = ["json", "stream", "multipart"] }
+image = "0.25.9"
+uuid = "1.19.0"
+xcap = "0.8.1"
+hound = "3.5.1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-tauri-nspanel = "0.1"
-tauri-plugin-macos-permissions = "2.0.0"
+tauri-plugin-macos-permissions = "2"
+tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2" }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-# --- ADD WASAPI HERE ---
-wasapi = "0.13"  # Required for Windows audio
-# -----------------------
+# FIX: Using 0.19.0 (Modern version compatible with your code)
+wasapi = "0.19.0"
 windows = { version = "0.52", features = [
     "Win32_Foundation",
     "Win32_UI_WindowsAndMessaging",
@@ -42,3 +55,7 @@ windows = { version = "0.52", features = [
     "Win32_System_Com",
     "Win32_Media_Audio",
 ] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libpulse-binding = "2.30.1"
+libpulse-simple-binding = "2.29.0"

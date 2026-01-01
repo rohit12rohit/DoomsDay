@@ -537,35 +537,9 @@ pub fn set_always_on_top<R: Runtime>(app: AppHandle<R>, enabled: bool) -> Result
 
 /// Handle toggle dashboard shortcut
 fn handle_toggle_dashboard<R: Runtime>(app: &AppHandle<R>) {
-    use tauri::Manager;
-    if let Some(dashboard_window) = app.get_webview_window("dashboard") {
-        match dashboard_window.is_visible() {
-            Ok(true) => {
-                // Window is visible, hide it
-                if let Err(e) = dashboard_window.hide() {
-                    eprintln!("Failed to hide dashboard window: {}", e);
-                }
-            }
-            Ok(false) => {
-                // Window is hidden, show and focus it
-                if let Err(e) = dashboard_window.show() {
-                    eprintln!("Failed to show dashboard window: {}", e);
-                }
-                if let Err(e) = dashboard_window.set_focus() {
-                    eprintln!("Failed to focus dashboard window: {}", e);
-                }
-            }
-            Err(e) => {
-                eprintln!("Failed to check dashboard visibility: {}", e);
-            }
-        }
-    } else {
-        // Window doesn't exist, create it
-        match create_dashboard_window(&app) {
-            Ok(_) => eprintln!("Dashboard window created successfully"),
-            Err(e) => eprintln!("Failed to create dashboard window: {}", e),
-        }
-    }
+    use crate::window::toggle_dashboard;
+    // We can call the command directly or the logic
+    toggle_dashboard(app.clone()); 
 }
 
 /// Handle focus input shortcut
