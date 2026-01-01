@@ -52,6 +52,16 @@ export const DEFAULT_SHORTCUT_ACTIONS: ShortcutAction[] = [
     },
   },
   {
+    id: "system_audio_send",
+    name: "Send Audio (Manual)",
+    description: "Force stop and send current audio (Continuous Mode)",
+    defaultKey: {
+      macos: "cmd+shift+enter",
+      windows: "ctrl+shift+enter",
+      linux: "ctrl+shift+enter",
+    },
+  },
+  {
     id: "audio_recording",
     name: "Voice Input",
     description: "Start voice recording",

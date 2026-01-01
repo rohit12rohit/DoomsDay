@@ -684,6 +684,17 @@ export function useSystemAudio() {
       }
     });
   }, [startCapture, stopCapture]);
+  
+  // Register manual send shortcut - ADDED THIS BLOCK
+  useEffect(() => {
+    globalShortcuts.registerCustomShortcutCallback("system_audio_send", () => {
+      manualStopAndSend();
+    });
+
+    return () => {
+      globalShortcuts.unregisterCustomShortcutCallback("system_audio_send");
+    };
+  }, [manualStopAndSend]);
 
   // Manage microphone stream for audio visualizer
   useEffect(() => {
