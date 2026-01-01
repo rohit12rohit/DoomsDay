@@ -8,10 +8,6 @@ interface UseShortcutsProps {
   customShortcuts?: Record<string, () => void>;
 }
 
-/**
- * Hook to manage global shortcuts for the application
- * Automatically registers callbacks for all shortcut actions
- */
 export const useShortcuts = ({
   onAudioRecording,
   onScreenshot,
@@ -24,24 +20,28 @@ export const useShortcuts = ({
     registerSystemAudioCallback,
     registerCustomShortcutCallback,
     unregisterCustomShortcutCallback,
+    ...rest
   } = useGlobalShortcuts();
 
-  // Register standard callbacks
   useEffect(() => {
     if (onAudioRecording) {
-      registerAudioCallback(onAudioRecording);
+      const cleanup = registerAudioCallback(onAudioRecording);
+      // Fix: Wrap in a function that returns void
+      return () => { cleanup(); };
     }
   }, [onAudioRecording, registerAudioCallback]);
 
   useEffect(() => {
     if (onScreenshot) {
-      registerScreenshotCallback(onScreenshot);
+      const cleanup = registerScreenshotCallback(onScreenshot);
+      return () => { cleanup(); };
     }
   }, [onScreenshot, registerScreenshotCallback]);
 
   useEffect(() => {
     if (onSystemAudio) {
-      registerSystemAudioCallback(onSystemAudio);
+      const cleanup = registerSystemAudioCallback(onSystemAudio);
+      return () => { cleanup(); };
     }
   }, [onSystemAudio, registerSystemAudioCallback]);
 
@@ -51,7 +51,6 @@ export const useShortcuts = ({
       registerCustomShortcutCallback(actionId, callback);
     });
 
-    // Cleanup on unmount
     return () => {
       Object.keys(customShortcuts).forEach((actionId) => {
         unregisterCustomShortcutCallback(actionId);
@@ -63,5 +62,12 @@ export const useShortcuts = ({
     unregisterCustomShortcutCallback,
   ]);
 
-  return useGlobalShortcuts();
+  return {
+    registerAudioCallback,
+    registerScreenshotCallback,
+    registerSystemAudioCallback,
+    registerCustomShortcutCallback,
+    unregisterCustomShortcutCallback,
+    ...rest,
+  };
 };

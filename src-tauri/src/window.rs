@@ -1,213 +1,85 @@
-#[cfg(target_os = "macos")]
-use tauri::LogicalPosition;
-use tauri::{App, AppHandle, Manager, Runtime, WebviewWindow, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, Runtime, WebviewWindow};
 
-// The offset from the top of the screen to the window
-const TOP_OFFSET: i32 = 54;
+// Define the fixed height and offset
+pub const WINDOW_HEIGHT: f64 = 54.0;
+pub const TOP_OFFSET: f64 = 0.0;
 
-/// Sets up the main window with custom positioning
-pub fn setup_main_window(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
-    // Try different possible window labels
-    let window = app
-        .get_webview_window("main")
-        .or_else(|| app.get_webview_window("pluely"))
-        .or_else(|| {
-            // Get the first window if specific labels don't work
-            app.webview_windows().values().next().cloned()
-        })
-        .ok_or("No window found")?;
-
-    position_window_top_center(&window, TOP_OFFSET)?;
-
-    // Set window as non-focusable on Windows
-    // #[cfg(target_os = "windows")]
-    // {
-    //     let _ = window.set_focusable(false);
-    // }
-
-    Ok(())
-}
-
-/// Positions a window at the top center of the screen with a specified Y offset
-pub fn position_window_top_center(
-    window: &WebviewWindow,
-    y_offset: i32,
-) -> Result<(), Box<dyn std::error::Error>> {
-    // Get the primary monitor
-    if let Some(monitor) = window.primary_monitor()? {
-        let monitor_size = monitor.size();
-        let window_size = window.outer_size()?;
-
-        // Calculate center X position
-        let center_x = (monitor_size.width as i32 - window_size.width as i32) / 2;
-
-        // Set the window position
-        window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
-            x: center_x,
-            y: y_offset,
-        }))?;
-    }
-
-    Ok(())
-}
-
-/// Future function for centering window completely (both X and Y)
-#[allow(dead_code)]
-pub fn center_window_completely(window: &WebviewWindow) -> Result<(), Box<dyn std::error::Error>> {
-    if let Some(monitor) = window.primary_monitor()? {
-        let monitor_size = monitor.size();
-        let window_size = window.outer_size()?;
-
-        let center_x = (monitor_size.width as i32 - window_size.width as i32) / 2;
-        let center_y = (monitor_size.height as i32 - window_size.height as i32) / 2;
-
-        window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
-            x: center_x,
-            y: center_y,
-        }))?;
-    }
-
-    Ok(())
+#[tauri::command]
+pub fn set_window_height(window: WebviewWindow, height: f64) {
+    let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+        width: 600.0,
+        height,
+    }));
 }
 
 #[tauri::command]
-pub fn set_window_height(window: tauri::WebviewWindow, height: u32) -> Result<(), String> {
-    use tauri::{LogicalSize, Size};
-
-    // Simply set the window size with fixed width and new height
-    let new_size = LogicalSize::new(600.0, height as f64);
-    window
-        .set_size(Size::Logical(new_size))
-        .map_err(|e| format!("Failed to resize window: {}", e))?;
-
-    Ok(())
-}
-
-#[tauri::command]
-pub fn open_dashboard(app: tauri::AppHandle) -> Result<(), String> {
-    // Check if dashboard window already exists
-    if let Some(dashboard_window) = app.get_webview_window("dashboard") {
-        // Window exists, just focus and show it
-        dashboard_window
-            .set_focus()
-            .map_err(|e| format!("Failed to focus dashboard window: {}", e))?;
-        dashboard_window
-            .show()
-            .map_err(|e| format!("Failed to show dashboard window: {}", e))?;
-    } else {
-        // Window doesn't exist, create it with platform-aware defaults
-        create_dashboard_window(&app)
-            .map_err(|e| format!("Failed to create dashboard window: {}", e))?;
+pub fn open_dashboard(app: AppHandle) {
+    if let Some(window) = app.get_webview_window("dashboard") {
+        let _ = window.show();
+        let _ = window.set_focus();
     }
-
-    Ok(())
 }
 
 #[tauri::command]
-pub fn toggle_dashboard(app: tauri::AppHandle) -> Result<(), String> {
-    if let Some(dashboard_window) = app.get_webview_window("dashboard") {
-        match dashboard_window.is_visible() {
-            Ok(true) => {
-                // Window is visible, hide it
-                dashboard_window
-                    .hide()
-                    .map_err(|e| format!("Failed to hide dashboard window: {}", e))?;
-            }
-            Ok(false) => {
-                // Window is hidden, show and focus it
-                dashboard_window
-                    .show()
-                    .map_err(|e| format!("Failed to show dashboard window: {}", e))?;
-                dashboard_window
-                    .set_focus()
-                    .map_err(|e| format!("Failed to focus dashboard window: {}", e))?;
-            }
-            Err(e) => {
-                return Err(format!("Failed to check dashboard visibility: {}", e));
-            }
+pub fn toggle_dashboard(app: AppHandle) {
+    if let Some(window) = app.get_webview_window("dashboard") {
+        if window.is_visible().unwrap_or(false) {
+            let _ = window.hide();
+        } else {
+            let _ = window.show();
+            let _ = window.set_focus();
         }
-    } else {
-        // Window doesn't exist, create it
-        create_dashboard_window(&app)
-            .map_err(|e| format!("Failed to create dashboard window: {}", e))?;
     }
-
-    Ok(())
 }
 
 #[tauri::command]
-pub fn move_window(app: tauri::AppHandle, direction: String, step: i32) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("main") {
-        let current_pos = window
-            .outer_position()
-            .map_err(|e| format!("Failed to get window position: {}", e))?;
+pub fn move_window(_window: WebviewWindow, direction: String) {
+    println!("Move window command received: {}", direction);
+}
 
-        let (new_x, new_y) = match direction.as_str() {
-            "up" => (current_pos.x, current_pos.y - step),
-            "down" => (current_pos.x, current_pos.y + step),
-            "left" => (current_pos.x - step, current_pos.y),
-            "right" => (current_pos.x + step, current_pos.y),
-            _ => return Err(format!("Invalid direction: {}", direction)),
+pub fn setup_main_window<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+    let window = app.get_webview_window("main").unwrap();
+
+    if let Some(monitor) = window.current_monitor()? {
+        let screen_size = monitor.size();
+        let scale_factor = monitor.scale_factor();
+        let logical_width = 600.0; 
+        
+        let x = (screen_size.width as f64 / scale_factor - logical_width) / 2.0;
+        let y = TOP_OFFSET;
+
+        window.set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }))?;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_NOACTIVATE
         };
 
-        window
-            .set_position(tauri::Position::Physical(tauri::PhysicalPosition {
-                x: new_x,
-                y: new_y,
-            }))
-            .map_err(|e| format!("Failed to set window position: {}", e))?;
-    } else {
-        return Err("Main window not found".to_string());
+        // FIXED: Correctly cast the HWND handle
+        let hwnd_val = window.hwnd().unwrap().0;
+        let hwnd_ptr = HWND(hwnd_val as _);
+
+        unsafe {
+            let current_style = GetWindowLongPtrW(hwnd_ptr, GWL_EXSTYLE);
+            let new_style = current_style | (WS_EX_NOACTIVATE.0 as isize);
+            SetWindowLongPtrW(hwnd_ptr, GWL_EXSTYLE, new_style);
+        }
+        
+        window.set_always_on_top(true)?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        use tauri_nspanel::WebviewWindowExt;
+        window.set_visible_on_all_workspaces(true)?;
     }
 
     Ok(())
 }
 
-pub fn create_dashboard_window<R: Runtime>(
-    app: &AppHandle<R>,
-) -> Result<WebviewWindow<R>, tauri::Error> {
-    let base_builder =
-        WebviewWindowBuilder::new(app, "dashboard", tauri::WebviewUrl::App("/chats".into()));
-
-    #[cfg(target_os = "macos")]
-    let base_builder = base_builder
-        .title("Pluely - Dashboard")
-        .center()
-        .decorations(true)
-        .inner_size(1200.0, 800.0)
-        .min_inner_size(800.0, 600.0)
-        .hidden_title(true)
-        .title_bar_style(tauri::TitleBarStyle::Overlay)
-        .content_protected(true)
-        .visible(true)
-        .traffic_light_position(LogicalPosition::new(14.0, 18.0));
-
-    #[cfg(not(target_os = "macos"))]
-    let base_builder = base_builder
-        .title("Pluely - Dashboard")
-        .center()
-        .decorations(true)
-        .skip_taskbar(true)
-        .inner_size(800.0, 600.0)
-        .min_inner_size(800.0, 600.0)
-        .content_protected(true)
-        .visible(true);
-
-    // FIX: Build the window and attach a close-prevention handler
-    let window = base_builder.build()?;
-    
-    // Clone the handle so we can use it inside the closure
-    let window_handle = window.clone();
-    
-    // Intercept the close event
-    window.on_window_event(move |event| {
-        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-            // Prevent the window from being destroyed
-            api.prevent_close();
-            // Just hide it instead
-            let _ = window_handle.hide();
-        }
-    });
-
-    Ok(window)
+pub fn create_dashboard_window(_app: &AppHandle) -> tauri::Result<()> {
+    Ok(())
 }

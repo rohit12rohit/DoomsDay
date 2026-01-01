@@ -33,6 +33,9 @@ pub fn run() {
     // Get PostHog API key
     let posthog_api_key = option_env!("POSTHOG_API_KEY").unwrap_or("").to_string();
     let mut builder = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            let _ = app.get_webview_window("main").expect("no main window").set_focus();
+        }))
         .plugin(
             tauri_plugin_sql::Builder::default()
                 .add_migrations("sqlite:pluely.db", db::migrations())
@@ -56,6 +59,17 @@ pub fn run() {
     {
         builder = builder.plugin(tauri_nspanel::init());
     }
+    
+    // FIX: Initialize Autostart safely
+    #[cfg(desktop)]
+    {
+        use tauri_plugin_autostart::MacosLauncher;
+        builder = builder.plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            Some(vec![]),
+        ));
+    }
+
     let mut builder = builder
         .invoke_handler(tauri::generate_handler![
             get_app_version,
@@ -101,7 +115,10 @@ pub fn run() {
         ])
         .setup(|app| {
             // Setup main window positioning
-            window::setup_main_window(app).expect("Failed to setup main window");
+            if let Err(e) = window::setup_main_window(app.handle()) {
+                 eprintln!("Failed to setup main window: {}", e);
+            }
+            
             #[cfg(target_os = "macos")]
             init(app.app_handle());
 
@@ -112,71 +129,61 @@ pub fn run() {
                 }
             }
 
-            #[cfg(desktop)]
-            {
-                use tauri_plugin_autostart::MacosLauncher;
+            // FIX: Initialize global shortcut plugin with centralized handler safely
+            // We use match instead of expect/unwrap to prevent crashing if registration fails
+            let shortcut_plugin = tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(move |app, shortcut, event| {
+                    use tauri_plugin_global_shortcut::{Shortcut, ShortcutState};
 
-                #[allow(deprecated, unexpected_cfgs)]
-                if let Err(e) = app.handle().plugin(tauri_plugin_autostart::init(
-                    MacosLauncher::LaunchAgent,
-                    Some(vec![]),
-                )) {
-                    eprintln!("Failed to initialize autostart plugin: {}", e);
-                }
-            }
+                    let action_id = {
+                        let state = app.state::<shortcuts::RegisteredShortcuts>();
+                        let registered = match state.shortcuts.lock() {
+                            Ok(guard) => guard,
+                            Err(poisoned) => {
+                                eprintln!("Mutex poisoned in handler, recovering...");
+                                poisoned.into_inner()
+                            }
+                        };
 
-            // Initialize global shortcut plugin with centralized handler
-            app.handle()
-                .plugin(
-                    tauri_plugin_global_shortcut::Builder::new()
-                        .with_handler(move |app, shortcut, event| {
-                            use tauri_plugin_global_shortcut::{Shortcut, ShortcutState};
-
-                            let action_id = {
-                                let state = app.state::<shortcuts::RegisteredShortcuts>();
-                                let registered = match state.shortcuts.lock() {
-                                    Ok(guard) => guard,
-                                    Err(poisoned) => {
-                                        eprintln!("Mutex poisoned in handler, recovering...");
-                                        poisoned.into_inner()
-                                    }
-                                };
-
-                                registered.iter().find_map(|(action_id, shortcut_str)| {
-                                    if let Ok(s) = shortcut_str.parse::<Shortcut>() {
-                                        if &s == shortcut {
-                                            return Some(action_id.clone());
-                                        }
-                                    }
-                                    None
-                                })
-                            };
-
-                            if let Some(action_id) = action_id {
-                                match event.state() {
-                                    ShortcutState::Pressed => {
-                                        if let Some(direction) =
-                                            action_id.strip_prefix("move_window_")
-                                        {
-                                            shortcuts::start_move_window(app, direction);
-                                        } else {
-                                            eprintln!("Shortcut triggered: {}", action_id);
-                                            shortcuts::handle_shortcut_action(app, &action_id);
-                                        }
-                                    }
-                                    ShortcutState::Released => {
-                                        if let Some(direction) =
-                                            action_id.strip_prefix("move_window_")
-                                        {
-                                            shortcuts::stop_move_window(app, direction);
-                                        }
-                                    }
+                        registered.iter().find_map(|(action_id, shortcut_str)| {
+                            if let Ok(s) = shortcut_str.parse::<Shortcut>() {
+                                if &s == shortcut {
+                                    return Some(action_id.clone());
                                 }
                             }
+                            None
                         })
-                        .build(),
-                )
-                .expect("Failed to initialize global shortcut plugin");
+                    };
+
+                    if let Some(action_id) = action_id {
+                        match event.state() {
+                            ShortcutState::Pressed => {
+                                if let Some(direction) =
+                                    action_id.strip_prefix("move_window_")
+                                {
+                                    shortcuts::start_move_window(app, direction);
+                                } else {
+                                    eprintln!("Shortcut triggered: {}", action_id);
+                                    shortcuts::handle_shortcut_action(app, &action_id);
+                                }
+                            }
+                            ShortcutState::Released => {
+                                if let Some(direction) =
+                                    action_id.strip_prefix("move_window_")
+                                {
+                                    shortcuts::stop_move_window(app, direction);
+                                }
+                            }
+                        }
+                    }
+                })
+                .build();
+
+            // Safely register the plugin
+            if let Err(e) = app.handle().plugin(shortcut_plugin) {
+                eprintln!("WARNING: Failed to initialize global shortcut plugin: {}. Shortcuts may not work, but app will run.", e);
+            }
+
             if let Err(e) = shortcuts::setup_global_shortcuts(app.handle()) {
                 eprintln!("Failed to setup global shortcuts: {}", e);
             }
