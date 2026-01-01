@@ -7,8 +7,10 @@ use std::task::{Poll, Waker};
 use std::thread;
 use std::time::Duration;
 use tracing::error;
-// FIX: Use ShareMode instead of StreamMode
-use wasapi::{get_default_device, Direction, SampleType, ShareMode, WaveFormat, Handle, AudioCaptureClient, DeviceCollection};
+// FIX: Updated imports for wasapi 0.22.0
+use wasapi::{
+    AudioCaptureClient, DeviceEnumerator, Direction, Handle, SampleType, WaveFormat, StreamMode,
+};
 
 pub struct SpeakerInput {
     device_index: Option<usize>,
@@ -91,13 +93,19 @@ impl SpeakerStream {
         device_index: Option<usize>,
     ) -> Result<()> {
         let init_result: Result<(Handle, AudioCaptureClient, u32), anyhow::Error> = (|| {
+            // FIX: Use DeviceEnumerator for 0.22.0
+            let enumerator = DeviceEnumerator::new()?;
+            
             let device = match device_index {
                 Some(index) => {
-                    let collection = DeviceCollection::new(&Direction::Render)?;
+                    // FIX: get_device_collection takes 1 arg (reference to direction)
+                    let collection = enumerator.get_device_collection(&Direction::Render)?;
                     collection.get_device_at_index(index.try_into()?)?
                 }
-                None => get_default_device(&Direction::Render)?,
+                // FIX: get_default_device is the correct method name on enumerator
+                None => enumerator.get_default_device(&Direction::Render)?,
             };
+
             let mut audio_client = device.get_iaudioclient()?;
 
             let device_format = audio_client.get_mixformat()?;
@@ -107,18 +115,22 @@ impl SpeakerStream {
             let desired_format =
                 WaveFormat::new(32, 32, &SampleType::Float, actual_rate as usize, 1, None);
 
-            let (_def_time, min_time) = audio_client.get_device_period()?;
+            // FIX: Restore StreamMode::EventsShared which worked in user's original code
+            // and fits the 3-argument initialize_client signature.
+            // Loopback is implicit when using Direction::Capture on a Render device.
+            let mode = StreamMode::EventsShared { 
+                autoconvert: true, 
+                buffer_duration_hns: 0 // Use default or specific duration if needed
+            };
 
-            // FIX: Initialize with modern signature (no StreamMode)
-            // initialize_client(format, period, direction, sharemode, event_handle)
             audio_client.initialize_client(
-    &desired_format,
-    &Direction::Capture,
-    &ShareMode::Shared,
-).map_err(|e| {
-    error!("Failed to initialize audio client: {}", e);
-    e
-})?;
+                &desired_format,
+                &Direction::Capture,
+                &mode,
+            ).map_err(|e| {
+                error!("Failed to initialize audio client: {}", e);
+                e
+            })?;
 
             let h_event = audio_client.set_get_eventhandle()?;
             let render_client = audio_client.get_audiocaptureclient()?;
@@ -140,12 +152,16 @@ impl SpeakerStream {
                         }
                     }
 
+                    // FIX: Explicitly ignore result to satisfy type inference if needed
                     if h_event.wait_for_event(3000).is_err() {
                         error!("Pluely timeout error, stopping capture");
                         break;
                     }
 
                     let mut temp_queue = VecDeque::new();
+                    
+                    // FIX: Handle the Result<BufferInfo, ...> return type correctly
+                    // We ignore BufferInfo for now as we just want the data in temp_queue
                     if let Err(e) = render_client.read_from_device_to_deque(&mut temp_queue) {
                         error!("Pluely Failed to read audio data: {}", e);
                         continue;

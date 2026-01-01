@@ -94,6 +94,13 @@ pub async fn start_screen_capture(app: tauri::AppHandle) -> Result<(), String> {
 
     // Create overlay windows for all monitors
     for (idx, monitor) in capture_monitors.iter().enumerate() {
+        // FIX: Unwrap xcap Result values safely for logic
+        let monitor_width = monitor.width().unwrap_or(1920);
+        let monitor_height = monitor.height().unwrap_or(1080);
+        let monitor_x = monitor.x().unwrap_or(0);
+        let monitor_y = monitor.y().unwrap_or(0);
+        let monitor_is_primary = monitor.is_primary().unwrap_or(false);
+
         let (logical_width, logical_height, logical_x, logical_y) =
             if let Some(display) = tauri_monitors.get(idx) {
                 let scale_factor = display.scale_factor();
@@ -110,10 +117,10 @@ pub async fn start_screen_capture(app: tauri::AppHandle) -> Result<(), String> {
             } else {
                 // Fallback to xcap monitor info if Tauri monitor data is unavailable/mismatched
                 (
-                    monitor.width() as f64,
-                    monitor.height() as f64,
-                    monitor.x() as f64,
-                    monitor.y() as f64,
+                    monitor_width as f64,
+                    monitor_height as f64,
+                    monitor_x as f64,
+                    monitor_y as f64,
                 )
             };
 
@@ -147,7 +154,7 @@ pub async fn start_screen_capture(app: tauri::AppHandle) -> Result<(), String> {
         overlay.show().ok();
         overlay.set_always_on_top(true).ok();
 
-        if monitor.is_primary() {
+        if monitor_is_primary {
             overlay.set_focus().ok();
             overlay
                 .request_user_attention(Some(tauri::UserAttentionType::Critical))
@@ -159,7 +166,8 @@ pub async fn start_screen_capture(app: tauri::AppHandle) -> Result<(), String> {
     std::thread::sleep(std::time::Duration::from_millis(100));
 
     for (idx, monitor) in capture_monitors.iter().enumerate() {
-        if monitor.is_primary() {
+        // FIX: Handle Result for is_primary
+        if monitor.is_primary().unwrap_or(false) {
             let window_label = format!("capture-overlay-{}", idx);
             if let Some(window) = app.get_webview_window(&window_label) {
                 window.set_focus().ok();
@@ -319,10 +327,14 @@ pub async fn capture_to_base64(window: tauri::WebviewWindow) -> Result<String, S
         let mut best_area: i64 = 0;
 
         for (idx, monitor) in monitors.iter().enumerate() {
-            let monitor_left = monitor.x();
-            let monitor_top = monitor.y();
-            let monitor_right = monitor_left.saturating_add(monitor.width() as i32);
-            let monitor_bottom = monitor_top.saturating_add(monitor.height() as i32);
+            // FIX: Handle Result for monitor properties in updated xcap
+            let monitor_left = monitor.x().map_err(|e| e.to_string())?;
+            let monitor_top = monitor.y().map_err(|e| e.to_string())?;
+            let monitor_width = monitor.width().map_err(|e| e.to_string())?;
+            let monitor_height = monitor.height().map_err(|e| e.to_string())?;
+            
+            let monitor_right = monitor_left.saturating_add(monitor_width as i32);
+            let monitor_bottom = monitor_top.saturating_add(monitor_height as i32);
 
             let overlap_width =
                 (window_right.min(monitor_right) - window_left.max(monitor_left)).max(0);
@@ -343,8 +355,14 @@ pub async fn capture_to_base64(window: tauri::WebviewWindow) -> Result<String, S
             let mut closest_distance = i128::MAX;
 
             for (idx, monitor) in monitors.iter().enumerate() {
-                let monitor_center_x = monitor.x().saturating_add(monitor.width() as i32 / 2);
-                let monitor_center_y = monitor.y().saturating_add(monitor.height() as i32 / 2);
+                // FIX: Handle Result for monitor properties
+                let mx = monitor.x().map_err(|e| e.to_string())?;
+                let my = monitor.y().map_err(|e| e.to_string())?;
+                let mw = monitor.width().map_err(|e| e.to_string())?;
+                let mh = monitor.height().map_err(|e| e.to_string())?;
+
+                let monitor_center_x = mx.saturating_add(mw as i32 / 2);
+                let monitor_center_y = my.saturating_add(mh as i32 / 2);
                 let dx = (window_center_x - monitor_center_x) as i128;
                 let dy = (window_center_y - monitor_center_y) as i128;
                 let distance = dx * dx + dy * dy;

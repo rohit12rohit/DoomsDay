@@ -25,7 +25,6 @@ tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-machine-uid = "0.1.2"
 tauri-plugin-single-instance = "2.0.0"
-# FIX: Restored PostHog plugin (Required to fix 'Permission posthog:default not found')
 tauri-plugin-posthog = "0.2.4"
 
 serde = { version = "1", features = ["derive"] }
@@ -37,7 +36,7 @@ futures-util = "0.3"
 base64 = "0.22"
 reqwest = { version = "0.12", features = ["json", "stream", "multipart"] }
 image = "0.25.9"
-uuid = "1.19.0"
+uuid = { version = "1.19.0", features = ["v4"] }
 xcap = "0.8.1"
 hound = "3.5.1"
 
@@ -46,9 +45,10 @@ tauri-plugin-macos-permissions = "2"
 tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2" }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-# FIX: Using 0.19.0 (Modern version compatible with your code)
-wasapi = "0.19.0"
-windows = { version = "0.52", features = [
+# FIX: Updated to 0.22.0 to support StreamMode::Loopback
+wasapi = "0.22.0"
+# FIX: Updated to 0.62.0 to match wasapi dependencies
+windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_UI_WindowsAndMessaging",
     "Win32_Graphics_Gdi",

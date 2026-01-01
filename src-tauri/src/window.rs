@@ -20,6 +20,7 @@ pub fn open_dashboard(app: AppHandle) {
     }
 }
 
+#[tauri::command]
 pub fn toggle_dashboard<R: Runtime>(app: AppHandle<R>) {
     if let Some(window) = app.get_webview_window("dashboard") {
         if window.is_visible().unwrap_or(false) {
@@ -57,9 +58,9 @@ pub fn setup_main_window<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
             GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_NOACTIVATE
         };
 
-        // FIX: Correctly cast HWND to isize for Windows crate
+        // FIX: Cast for windows 0.62.0 compatibility (HWND wraps *mut void now)
         let hwnd_val = window.hwnd().unwrap().0;
-        let hwnd_ptr = HWND(hwnd_val as isize);
+        let hwnd_ptr = HWND(hwnd_val as *mut std::ffi::c_void);
 
         unsafe {
             let current_style = GetWindowLongPtrW(hwnd_ptr, GWL_EXSTYLE);
